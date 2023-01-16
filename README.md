@@ -14,12 +14,16 @@
 #### 测试结果
 
 ```shell script
-总请求数1000, 分别测试, 结果如下:
+获取亚马逊账号列表接口: 总请求数1000, 分别测试, 结果如下:
 
-[root@ac_web ]# php service.php start Amazon 9901  -d  (守护进程启动)
+[root@ac_web ]# php service.php start 8080 -d  (守护进程启动)
  
-[root@ac_web easy_mysql_pool]# curl "127.0.0.1:9901/?task_type=Amazon&concurrency=10&total=1000"
-{"taskCount":1000,"concurrency":10,"useTime":"103s"}
+[root@ac_web easy_mysql_pool]# curl "192.168.92.208:8080/account/lists?platform_code=Amazon"
+
+
+ab 并发测试:
+
+[root@localhost ~]# ab -n 1000 -c 100 -k 192.168.92.208:8080/account/lists?platform_code=Amazon
 
 
 ```

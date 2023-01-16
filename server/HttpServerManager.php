@@ -41,7 +41,7 @@ class HttpServerManager
      */
     private $port;
     private $processPrefix = 'co-web-';
-    private $setting = ['worker_num' => 5, 'enable_coroutine' => true];
+    private $setting = ['worker_num' => 10, 'enable_coroutine' => true];
     /**
      * @var bool
      */
@@ -69,7 +69,7 @@ class HttpServerManager
     /**
      * @var int
      */
-    private $maxObjectNum = 80;
+    private $maxObjectNum = 100;
     /**
      * @var int
      */
@@ -79,9 +79,9 @@ class HttpServerManager
     {
         try {
             $cmd = isset($argv[1]) ? (string)$argv[1] : 'status';
-            $this->port = isset($argv[3]) ? (string)$argv[3] : 9901;
-            $this->daemon = isset($argv[4]) && (in_array($argv[4], ['daemon', 'd', '-d'])) ? true : false;
-            if (empty($this->taskType) || empty($this->port) || empty($cmd)) {
+            $this->port = isset($argv[2]) ? (int)$argv[2] : 8080;
+            $this->daemon = isset($argv[3]) && (in_array($argv[3], ['daemon', 'd', '-d'])) ? true : false;
+            if (empty($this->port) || empty($cmd)) {
                 throw new InvalidArgumentException('params error');
             }
             $this->pidFile = $this->port . '.pid';
@@ -234,7 +234,7 @@ class HttpServerManager
             $return = ['code' => 201, 'message' => $e->getMessage(), 'data' => []];
         }
         //返回响应
-        $this->logMessage('done');
+        //$this->logMessage('done');
         $response->header('Content-Type', 'application/json;charset=utf-8');
         return $response->end(json_encode($return));
     }

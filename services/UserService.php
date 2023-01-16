@@ -25,7 +25,6 @@ class UserService
             echo 'user not found:' . $decodeData['uid'] . PHP_EOL;
             return false;
         }
-        $userModel->closeDb();
         return $decodeData['uid'];
     }
 

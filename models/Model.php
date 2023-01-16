@@ -2,16 +2,19 @@
 
 namespace module\models;
 
-use module\lib\MysqliClient;
-use module\lib\MysqliDb;
+use EasySwoole\ORM\DbManager;
 
 class Model
 {
     /**
      * 共用DB
-     * @var MysqliDb
+     * @var \EasySwoole\ORM\Db\MysqliClient
      */
     protected static $db;
+    /**
+     * @var string
+     */
+    protected static $main = 'mainMysql';
     /**
      * @var []static
      */
@@ -34,21 +37,28 @@ class Model
         return self::$models[$className];
     }
 
+    /**
+     * @return \EasySwoole\ORM\Db\MysqliClient
+     */
     public static function getDb()
     {
         if (is_null(self::$db)) {
-            $mysqliClient = new MysqliClient();
-            self::$db = $mysqliClient->getQuery();
+            self::$db = self::getMysqlObject();
         }
         return self::$db;
     }
 
-    public function closeDb()
+    /**
+     * @return \EasySwoole\ORM\Db\MysqliClient
+     */
+    private static function getMysqlObject()
     {
-        if (self::$db !== null) {
-            self::$db->disconnect();
-            self::$db = null;
-        }
+        $connection = DbManager::getInstance()->getConnection(self::$main);
+        $timeout = null;
+        //即 createObject()对象，->defer($timeout)参数为空 默认获取config的timeout，此方法会自动回收对象，用户无需关心。
+        /* @var  $mysqlClient \EasySwoole\ORM\Db\MysqliClient */
+        $mysqlClient = $connection->defer($timeout);
+        return $mysqlClient;
     }
 
     public function tableName()
@@ -58,34 +68,36 @@ class Model
 
     public function insertData($data)
     {
-        self::$db->insert($this->tableName(), $data);
-        return self::$db->getInsertId();
+        self::$db->queryBuilder()->insert($this->tableName(), $data);
+        // 获取最后插入的insert_id 使用客户端从swoole mysql获取
+        return self::$db->mysqlClient()->insert_id;
     }
 
     public function saveData($data, $where)
     {
-        $query = self::$db;
         foreach ($where as $key => $value) {
-            $query->where($key, $value);
+            self::$db->queryBuilder()->where($key, $value);
         }
-        $res = $query->update($this->tableName(), $data);
-        return $res ? $query->count : 0;
+        self::$db->queryBuilder()->update($this->tableName(), $data);
+        return self::$db->mysqlClient()->affected_rows;
     }
 
-    public function findOne($where)
+    public function findOne($where, $columns = '*')
     {
         foreach ($where as $key => $value) {
-            self::$db->where($key, $value);
+            self::$db->queryBuilder()->where($key, $value);
         }
-        return self::$db->getOne($this->tableName());
+        self::$db->queryBuilder()->getOne($this->tableName(), $columns);
+        return self::$db->execBuilder();
     }
 
-    public function findAll($where)
+    public function findAll($where, $numRows = null, $columns = null)
     {
         foreach ($where as $key => $value) {
-            self::$db->where($key, $value);
+            self::$db->queryBuilder()->where($key, $value);
         }
-        return self::$db->get($this->tableName());
+        self::$db->queryBuilder()->get($this->tableName(), $numRows, $columns);
+        return self::$db->execBuilder();
     }
 
 }
