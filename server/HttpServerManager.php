@@ -1,0 +1,376 @@
+<?php
+
+namespace module\server;
+
+use EasySwoole\ORM\Db\Config;
+use EasySwoole\ORM\Db\Connection;
+use EasySwoole\ORM\DbManager;
+use EasySwoole\Pool\Manager;
+use EasySwoole\Redis\Config\RedisConfig;
+use Exception;
+use InvalidArgumentException;
+use module\lib\Dispatcher;
+use module\lib\RedisPool;
+use Swoole\Coroutine;
+use Swoole\Http\Request;
+use Swoole\Http\Response;
+use Swoole\Process;
+use Swoole\Server;
+use Swoole\Table;
+use Swoole\Timer;
+
+class HttpServerManager
+{
+
+    const EVENT_START = 'start';
+    const EVENT_MANAGER_START = 'managerStart';
+    const EVENT_WORKER_START = 'workerStart';
+    const EVENT_WORKER_STOP = 'workerStop';
+    const EVENT_REQUEST = 'request';
+
+    /**
+     * @var \Swoole\Http\Server
+     */
+    protected $httpServer;
+    /**
+     * @var string
+     */
+    private $taskType;
+    /**
+     * @var int|string
+     */
+    private $port;
+    private $processPrefix = 'co-web-';
+    private $setting = ['worker_num' => 5, 'enable_coroutine' => true];
+    /**
+     * @var bool
+     */
+    private $daemon;
+    /**
+     * @var string
+     */
+    private $pidFile;
+    private $checkAvailableTime = 1;
+    private $checkLiveTime = 10;
+    private $availableTimerId;
+    private $liveTimerId;
+    /**
+     * @var Table
+     */
+    private $poolTable;
+    /**
+     * @var string
+     */
+    private $mainMysql = 'mainMysql';
+    /**
+     * @var string
+     */
+    private $mainRedis = 'mainRedis';
+    /**
+     * @var int
+     */
+    private $maxObjectNum = 80;
+    /**
+     * @var int
+     */
+    private $minObjectNum = 10;
+
+    public function run($argv)
+    {
+        try {
+            $cmd = isset($argv[1]) ? (string)$argv[1] : 'status';
+            $this->port = isset($argv[3]) ? (string)$argv[3] : 9901;
+            $this->daemon = isset($argv[4]) && (in_array($argv[4], ['daemon', 'd', '-d'])) ? true : false;
+            if (empty($this->taskType) || empty($this->port) || empty($cmd)) {
+                throw new InvalidArgumentException('params error');
+            }
+            $this->pidFile = $this->port . '.pid';
+            switch ($cmd) {
+                case 'start':
+                    $this->start();
+                    break;
+                case 'stop':
+                    $this->stop();
+                    break;
+                case 'status':
+                    $this->status();
+                    break;
+                default:
+                    break;
+            }
+        } catch (Exception $e) {
+            $this->logMessage($e->getMessage());
+        }
+    }
+
+    private function start()
+    {
+        //一键协程化，使回调事件函数的mysql连接、查询协程化
+        Coroutine::set(['hook_flags' => SWOOLE_HOOK_TCP]);
+        //\Swoole\Runtime::enableCoroutine(SWOOLE_HOOK_ALL);
+        $this->renameProcessName($this->processPrefix . $this->taskType);
+        $this->httpServer = new \Swoole\Http\Server("0.0.0.0", $this->port);
+        $setting = [
+            'daemonize' => (bool)$this->daemon,
+            'log_file' => MODULE_DIR . '/logs/server-' . date('Y-m') . '.log',
+            'pid_file' => MODULE_DIR . '/logs/' . $this->pidFile,
+            //设置Worker进程收到停止服务通知后最大等待时间【默认值：3】，需大于定时器周期时间，否则通知会报Warning异常
+            'max_wait_time' => 10,
+        ];
+        $this->setServerSetting($setting);
+        $this->createTable();
+        $this->bindEvent(self::EVENT_START, [$this, 'onStart']);
+        $this->bindEvent(self::EVENT_MANAGER_START, [$this, 'onManagerStart']);
+        $this->bindEvent(self::EVENT_WORKER_START, [$this, 'onWorkerStart']);
+        $this->bindEvent(self::EVENT_WORKER_STOP, [$this, 'onWorkerStop']);
+        $this->bindEvent(self::EVENT_REQUEST, [$this, 'onRequest']);
+        $this->startServer();
+    }
+
+    /**
+     * 当前进程重命名
+     * @param $processName
+     * @return bool|mixed
+     */
+    private function renameProcessName($processName)
+    {
+        if (function_exists('cli_set_process_title')) {
+            return cli_set_process_title($processName);
+        } else if (function_exists('swoole_set_process_name')) {
+            return swoole_set_process_name($processName);
+        }
+        return false;
+    }
+
+    private function setServerSetting($setting = [])
+    {
+        $this->httpServer->set(array_merge($this->setting, $setting));
+    }
+
+    private function bindEvent($event, callable $callback)
+    {
+        $this->httpServer->on($event, $callback);
+    }
+
+    private function startServer()
+    {
+        $this->httpServer->start();
+    }
+
+    public function onStart(Server $server)
+    {
+        $this->logMessage('start, master_pid:' . $server->master_pid);
+        $this->renameProcessName($this->processPrefix . $this->taskType . '-master');
+    }
+
+    public function onManagerStart(Server $server)
+    {
+        $this->logMessage('manager start, manager_pid:' . $server->manager_pid);
+        $this->renameProcessName($this->processPrefix . $this->taskType . '-manager');
+    }
+
+    //连接池，每个worker进程隔离
+    public function onWorkerStart(Server $server, int $workerId)
+    {
+        $this->logMessage('worker start, worker_pid:' . $server->worker_pid);
+        $this->renameProcessName($this->processPrefix . $this->taskType . '-worker-' . $workerId);
+        //初始化连接池
+        try {
+            //================= 注册 mysql 连接池 =================
+            $config = new Config();
+            $config->setHost('192.168.92.209')
+                ->setPort(3306)
+                ->setUser('appuser')
+                ->setPassword('adf2FASFAS')
+                ->setTimeout(30)
+                ->setCharset('utf8')
+                ->setDatabase('yibai_account_manage')
+                ->setMaxObjectNum($this->maxObjectNum)  //连接池最大数，任务并发数不应超过此值
+                ->setMinObjectNum($this->minObjectNum);
+            DbManager::getInstance()->addConnection(new Connection($config), $this->mainMysql);    //连接池1
+            $connection = DbManager::getInstance()->getConnection($this->mainMysql);
+            $connection->__getClientPool()->keepMin();   //预热连接池1
+
+
+            //=================  (可选) 注册redis连接池 (http://192.168.92.208:9511/Account/mysqlPoolList)  =================
+            $config = new \EasySwoole\Pool\Config();
+            $redisConfig = new RedisConfig();
+            $redisConfig->setHost('192.168.92.208');
+            $redisConfig->setPort(7001);
+            $redisConfig->setAuth('fok09213');
+            $redisConfig->setTimeout(30);
+            // 注册连接池管理对象
+            Manager::getInstance()->register(new RedisPool($config, $redisConfig), $this->mainRedis);
+            //测试redis
+            $this->testPool();
+            $this->logMessage('use pool:' . $server->worker_pid);
+        } catch (Exception $e) {
+            $this->logMessage('initPool error:' . $e->getMessage());
+        }
+    }
+
+    public function onWorkerStop(Server $server, int $workerId)
+    {
+        $this->logMessage('worker stop, worker_pid:' . $server->worker_pid);
+        try {
+            $this->logMessage('pool close');
+            $this->clearTimer();
+        } catch (Exception $e) {
+            $this->logMessage('pool close error:' . $e->getMessage());
+        }
+    }
+
+    public function onRequest(Request $request, Response $response)
+    {
+        try {
+            //$startTime = time();
+            //数据库配置信息
+            //$mysqlClient = $this->getMysqlObject();
+            //转发请求
+            $dispatcher = new Dispatcher($request, $response);
+            $dispatcher->dispatch();
+            $return = ['code' => 200, 'message' => 'success', 'data' => $dispatcher->getResult()];
+        } catch (Exception $e) {
+            $return = ['code' => 201, 'message' => $e->getMessage(), 'data' => []];
+        }
+        //返回响应
+        $this->logMessage('done');
+        $response->header('Content-Type', 'application/json;charset=utf-8');
+        return $response->end(json_encode($return));
+    }
+
+    private function logMessage($logData)
+    {
+        $logData = (is_array($logData) || is_object($logData)) ? json_encode($logData, JSON_UNESCAPED_UNICODE) : $logData;
+        echo date('[Y-m-d H:i:s]') . $logData . PHP_EOL;
+    }
+
+    /**
+     * @param bool $force
+     * @throws Exception
+     */
+    private function stop($force = false)
+    {
+        $pidFile = MODULE_DIR . '/logs/' . $this->pidFile;
+        if (!file_exists($pidFile)) {
+            throw new Exception('server not running');
+        }
+        $pid = file_get_contents($pidFile);
+        if (!Process::kill($pid, 0)) {
+            unlink($pidFile);
+            throw new Exception("pid not exist:{$pid}");
+        } else {
+            if ($force) {
+                Process::kill($pid, SIGKILL);
+            } else {
+                Process::kill($pid);
+            }
+        }
+    }
+
+    /**
+     * @throws Exception
+     */
+    private function status()
+    {
+        $pidFile = MODULE_DIR . '/logs/' . $this->pidFile;
+        if (!file_exists($pidFile)) {
+            throw new Exception('server not running');
+        }
+        $pid = file_get_contents($pidFile);
+        //$signo=0，可以检测进程是否存在，不会发送信号
+        if (!Process::kill($pid, 0)) {
+            echo 'not running, pid:' . $pid . PHP_EOL;
+        } else {
+            echo 'running, pid:' . $pid . PHP_EOL;
+        }
+    }
+
+    /**
+     * @return \EasySwoole\ORM\Db\MysqliClient
+     */
+    private function getMysqlObject()
+    {
+        // 获取连接池
+        $connection = DbManager::getInstance()->getConnection($this->mainMysql);
+        $timeout = null;
+        //即 createObject()对象，->defer($timeout)参数为空 默认获取config的timeout，此方法会自动回收对象，用户无需关心。
+        /* @var  $mysqlClient \EasySwoole\ORM\Db\MysqliClient */
+        $mysqlClient = $connection->defer($timeout);
+        return $mysqlClient;
+    }
+
+    /**
+     * @return mixed
+     * @throws \EasySwoole\Pool\Exception\PoolEmpty
+     */
+    private function getRedisObject()
+    {
+        // 获取连接池
+        $redisPool = Manager::getInstance()->get($this->mainRedis);
+        $timeout = null;
+        $redis = $redisPool->defer($timeout);
+        return $redis;
+    }
+
+    //连接池对象注意点：
+    //1，需要定期检查是否可用；
+    //2，需要定期更新对象，防止在任务执行过程中连接断开（记录最后获取，使用时间，定时校验对象是否留存超时）
+    public function checkPool()
+    {
+        if (true) {
+            return 'not support now';
+        }
+        $this->availableTimerId = Timer::tick($this->checkAvailableTime * 1000, function () {
+
+        });
+
+        $this->liveTimerId = Timer::tick($this->checkLiveTime * 1000, function () {
+        });
+        return true;
+    }
+
+    private function clearTimer()
+    {
+        if ($this->availableTimerId) {
+            Timer::clear($this->availableTimerId);
+        }
+        if ($this->liveTimerId) {
+            Timer::clear($this->liveTimerId);
+        }
+    }
+
+    private function createTable()
+    {
+        if (true) {
+            return 'not support now';
+        }
+        //存储数据size，即mysql总行数
+        $size = 1024;
+        $this->poolTable = new Table($size);
+        $this->poolTable->column('created', Table::TYPE_INT, 10);
+        $this->poolTable->column('pid', Table::TYPE_INT, 10);
+        $this->poolTable->column('inuse', Table::TYPE_INT, 10);
+        $this->poolTable->column('loadWaitTimes', Table::TYPE_FLOAT, 10);
+        $this->poolTable->column('loadUseTimes', Table::TYPE_INT, 10);
+        $this->poolTable->column('lastAliveTime', Table::TYPE_INT, 10);
+        $this->poolTable->create();
+        return true;
+    }
+
+    private function testPool()
+    {
+        //测试mysql
+        //$mysqlClient = $this->getMysqlObject();
+
+        //测试redis
+        $redis = $this->getRedisObject();
+        //@todo
+        $key = 'co-server-redis-test';
+        $redis->set($key, 'a:' . mt_rand(1000, 9999) . ':' . date('Y-m-d H:i:s'), 120);
+        $result = $redis->get($key);
+        $this->logMessage('redisTest:' . $result);
+        $redis->del($key);
+    }
+
+}
