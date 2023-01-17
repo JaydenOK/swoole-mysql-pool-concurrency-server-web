@@ -41,7 +41,19 @@ class HttpServerManager
      */
     private $port;
     private $processPrefix = 'co-web-';
-    private $setting = ['worker_num' => 10, 'enable_coroutine' => true];
+    private $setting = [
+        'enable_coroutine' => true,
+        'worker_num' => 5,
+        //一个 worker 进程在处理完超过此数值的任务后将自动退出，进程退出后会释放所有内存和资源
+        'max_request' => 1000000,
+        //最大连接数，适当设置，提高并发数，max_connection 最大不得超过操作系统 ulimit -n 的值(增加服务器文件描述符的最大值)，否则会报一条警告信息，并重置为 ulimit -n 的值
+        //修改保存: vim /etc/security/limits.conf:
+        // * soft nofile 10000
+        // * hard nofile 10000
+        'max_conn' => 10000,
+        //设置Worker进程收到停止服务通知后最大等待时间【默认值：3】，需大于定时器周期时间，否则通知会报Warning异常
+        'max_wait_time' => 20,
+    ];
     /**
      * @var bool
      */
@@ -67,10 +79,12 @@ class HttpServerManager
      */
     private $mainRedis = 'mainRedis';
     /**
+     * worker连接池最大连接数，闲置后回收
      * @var int
      */
     private $maxObjectNum = 100;
     /**
+     * worker连接池初始化最小连接数
      * @var int
      */
     private $minObjectNum = 10;
@@ -114,8 +128,6 @@ class HttpServerManager
             'daemonize' => (bool)$this->daemon,
             'log_file' => MODULE_DIR . '/logs/server-' . date('Y-m') . '.log',
             'pid_file' => MODULE_DIR . '/logs/' . $this->pidFile,
-            //设置Worker进程收到停止服务通知后最大等待时间【默认值：3】，需大于定时器周期时间，否则通知会报Warning异常
-            'max_wait_time' => 10,
         ];
         $this->setServerSetting($setting);
         $this->createTable();
@@ -160,20 +172,20 @@ class HttpServerManager
     public function onStart(Server $server)
     {
         $this->logMessage('start, master_pid:' . $server->master_pid);
-        $this->renameProcessName($this->processPrefix . $this->taskType . '-master');
+        $this->renameProcessName($this->processPrefix . $this->port . '-master');
     }
 
     public function onManagerStart(Server $server)
     {
         $this->logMessage('manager start, manager_pid:' . $server->manager_pid);
-        $this->renameProcessName($this->processPrefix . $this->taskType . '-manager');
+        $this->renameProcessName($this->processPrefix . $this->port . '-manager');
     }
 
     //连接池，每个worker进程隔离
     public function onWorkerStart(Server $server, int $workerId)
     {
         $this->logMessage('worker start, worker_pid:' . $server->worker_pid);
-        $this->renameProcessName($this->processPrefix . $this->taskType . '-worker-' . $workerId);
+        $this->renameProcessName($this->processPrefix . $this->port . '-worker-' . $workerId);
         //初始化连接池
         try {
             //================= 注册 mysql 连接池 =================
@@ -220,6 +232,7 @@ class HttpServerManager
         }
     }
 
+    //回调方法为协程容器环境，可以直接使用协程api
     public function onRequest(Request $request, Response $response)
     {
         try {

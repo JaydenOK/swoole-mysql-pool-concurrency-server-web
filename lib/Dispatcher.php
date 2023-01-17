@@ -2,6 +2,7 @@
 
 namespace module\lib;
 
+use module\controllers\Controller;
 use Swoole\Http\Request;
 use Swoole\Http\Response;
 
@@ -23,7 +24,7 @@ class Dispatcher
     private $action = 'run';
     /**
      * 控制器所在空间，有且只有第一个大写字母
-     * @var
+     * @var Controller
      */
     private $className;
     /**

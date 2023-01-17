@@ -2,6 +2,7 @@
 
 namespace module\controllers;
 
+use module\lib\DingTalkRobotUtil;
 use module\models\AmazonModel;
 
 class Account extends Controller
@@ -21,7 +22,7 @@ class Account extends Controller
         }
         $accountModel = null;
         if ($platformCode === 'Amazon') {
-            $accountModel = new AmazonModel();
+            $accountModel = AmazonModel::model();
         }
         if ($accountModel === null) {
             throw new \Exception('platform_code not support.');
@@ -54,6 +55,13 @@ class Account extends Controller
             throw new \Exception('platform_code not support.');
         }
         $affectRow = $accountModel->saveData($data, ['id' => $id]);
+        go(function () use ($id, $data) {
+            //todo 协程处理其它任务
+            $content[] = '【修改账号通知】';
+            $content[] = '账号ID:' . $id;
+            $content[] = '修改内容:' . json_encode($data, JSON_UNESCAPED_UNICODE);
+            DingTalkRobotUtil::send($content, DingTalkRobotUtil::TOKEN_COMMON);
+        });
         return ['id' => $id, 'result' => $affectRow];
     }
 
