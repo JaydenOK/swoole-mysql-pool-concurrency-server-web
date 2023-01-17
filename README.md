@@ -17,8 +17,8 @@
 守护进程启动
 [root@ac_web ]# php service.php start 8080 -d
 
-获取亚马逊账号列表接口: 总请求数10000, 并发200, 1000分别测试, 结果如下:
-ab压测工具并发测试:
+获取亚马逊账号列表接口: 服务器4核8G服务器, 总请求数10000, 并发200, 1000分别测试, 结果如下:
+ab压测工具并发测试(吞吐量每秒查询率QPS达到4750~4966):
 
 [root@localhost ~]# ab -n 10000 -c 200 -k 192.168.92.208:8080/account/lists?platform_code=Amazon
 This is ApacheBench, Version 2.3 <$Revision: 1430300 $>
