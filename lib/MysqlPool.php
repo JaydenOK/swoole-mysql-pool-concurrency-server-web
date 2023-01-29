@@ -1,5 +1,5 @@
 <?php
-
+//自定义文件（未使用）, 实际使用: use EasySwoole\ORM\Db\MysqlPool;
 
 namespace module\lib;
 

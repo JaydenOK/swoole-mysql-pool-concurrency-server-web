@@ -2,6 +2,7 @@
 
 namespace module\models;
 
+use EasySwoole\ORM\Db\ClientInterface;
 use EasySwoole\ORM\DbManager;
 use Swoole\Coroutine;
 
@@ -72,6 +73,9 @@ class Model
         //即 createObject()对象，->defer($timeout)参数为空 默认获取config的timeout，此方法会自动回收对象，用户无需关心。
         /* @var  $mysqlClient \EasySwoole\ORM\Db\MysqliClient */
         $mysqlClient = $connection->defer($timeout);
+        if (!$mysqlClient instanceof ClientInterface) {
+            throw new \Exception("MysqlClient is not instanceof ClientInterface");
+        }
         return $mysqlClient;
     }
 
