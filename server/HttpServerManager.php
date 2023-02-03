@@ -1,10 +1,17 @@
 <?php
+/**
+ * 协程并发站点服务项目
+ *
+ * @author https://github.com/JaydenOK
+ */
 
 namespace module\server;
 
 use EasySwoole\ORM\Db\Config;
 use EasySwoole\ORM\Db\Connection;
+use EasySwoole\ORM\Db\MysqliClient;
 use EasySwoole\ORM\DbManager;
+use EasySwoole\Pool\Exception\PoolEmpty;
 use EasySwoole\Pool\Manager;
 use EasySwoole\Redis\Config\RedisConfig;
 use Exception;
@@ -300,7 +307,7 @@ class HttpServerManager
     }
 
     /**
-     * @return \EasySwoole\ORM\Db\MysqliClient
+     * @return MysqliClient
      */
     private function getMysqlObject()
     {
@@ -308,14 +315,14 @@ class HttpServerManager
         $connection = DbManager::getInstance()->getConnection($this->mainMysql);
         $timeout = null;
         //即 createObject()对象，->defer($timeout)参数为空 默认获取config的timeout，此方法会自动回收对象，用户无需关心。
-        /* @var  $mysqlClient \EasySwoole\ORM\Db\MysqliClient */
+        /* @var  $mysqlClient MysqliClient */
         $mysqlClient = $connection->defer($timeout);
         return $mysqlClient;
     }
 
     /**
      * @return mixed
-     * @throws \EasySwoole\Pool\Exception\PoolEmpty
+     * @throws PoolEmpty
      */
     private function getRedisObject()
     {
@@ -378,7 +385,6 @@ class HttpServerManager
 
         //测试redis
         $redis = $this->getRedisObject();
-        //@todo
         $key = 'co-server-redis-test';
         $redis->set($key, 'a:' . mt_rand(1000, 9999) . ':' . date('Y-m-d H:i:s'), 120);
         $result = $redis->get($key);
