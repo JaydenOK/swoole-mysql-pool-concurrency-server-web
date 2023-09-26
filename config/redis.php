@@ -3,8 +3,8 @@
  * 数据库配置
  */
 return [
-    'host' => '192.168.92.208', // 地址
-    'port' => 7001, // 端口
-    'auth' => 'fok09213', //密码
+    'host' => 'redis-test-0.redis-test.dev.svc.yafex.test', // 地址
+    'port' => 6379, // 端口
+    'auth' => 'yafex', //密码
     'timeout' => 45, //连接超时时间
 ];

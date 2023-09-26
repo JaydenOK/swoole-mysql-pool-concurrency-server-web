@@ -195,33 +195,36 @@ class HttpServerManager
         $this->renameProcessName($this->processPrefix . $this->port . '-worker-' . $workerId);
         //初始化连接池
         try {
+            $dbConfig = $this->databaseConfig();
             //================= 注册 mysql 连接池 =================
             $config = new Config();
-            $config->setHost('192.168.92.209')
+            $config->setHost($dbConfig['host'])
                 ->setPort(3306)
-                ->setUser('appuser')
-                ->setPassword('adf2FASFAS')
+                ->setUser($dbConfig['user'])
+                ->setPassword($dbConfig['password'])
                 ->setTimeout(30)
-                ->setCharset('utf8')
-                ->setDatabase('yibai_account_manage')
+                ->setCharset($dbConfig['charset'])
+                ->setDatabase($dbConfig['dbname'])
                 ->setMaxObjectNum($this->maxObjectNum)  //连接池最大数，任务并发数不应超过此值
                 ->setMinObjectNum($this->minObjectNum);
             DbManager::getInstance()->addConnection(new Connection($config), $this->mainMysql);    //连接池1
             $connection = DbManager::getInstance()->getConnection($this->mainMysql);
             $connection->__getClientPool()->keepMin();   //预热连接池1
 
-
             //=================  (可选) 注册redis连接池 (http://192.168.92.208:9511/Account/mysqlPoolList)  =================
-            $config = new \EasySwoole\Pool\Config();
-            $redisConfig = new RedisConfig();
-            $redisConfig->setHost('192.168.92.208');
-            $redisConfig->setPort(7001);
-            $redisConfig->setAuth('fok09213');
-            $redisConfig->setTimeout(30);
-            // 注册连接池管理对象
-            Manager::getInstance()->register(new RedisPool($config, $redisConfig), $this->mainRedis);
-            //测试redis
-            $this->testPool();
+            if (true) {
+                $rsConfig = $this->redisConfig();
+                $config = new \EasySwoole\Pool\Config();
+                $redisConfig = new RedisConfig();
+                $redisConfig->setHost($rsConfig['host']);
+                $redisConfig->setPort($rsConfig['port']);
+                $redisConfig->setAuth($rsConfig['auth']);
+                $redisConfig->setTimeout($rsConfig['timeout']);
+                // 注册连接池管理对象
+                Manager::getInstance()->register(new RedisPool($config, $redisConfig), $this->mainRedis);
+                //测试redis
+                $this->testPool();
+            }
             $this->logMessage('use pool:' . $server->worker_pid);
         } catch (Exception $e) {
             $this->logMessage('initPool error:' . $e->getMessage());
@@ -392,4 +395,31 @@ class HttpServerManager
         $redis->del($key);
     }
 
+    /**
+     * @return mixed
+     * @throws \Exception
+     */
+    protected function databaseConfig()
+    {
+        $configDir = dirname(dirname(__FILE__)) . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR;
+        $filePath = $configDir . 'database.php';
+        if (!file_exists($filePath)) {
+            throw new \Exception('database config not exist:' . $filePath);
+        }
+        return include_once($filePath);
+    }
+
+    /**
+     * @return mixed
+     * @throws \Exception
+     */
+    protected function redisConfig()
+    {
+        $configDir = dirname(dirname(__FILE__)) . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR;
+        $filePath = $configDir . 'redis.php';
+        if (!file_exists($filePath)) {
+            throw new \Exception('redis config not exist:' . $filePath);
+        }
+        return include_once($filePath);
+    }
 }

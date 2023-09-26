@@ -17,6 +17,9 @@ swoole协程并发站点服务项目，启动Http-Server接收用户请求，启
 守护进程启动
 [root@ac_web ]# php service.php start 8080 -d
 
+停止
+[root@ac_web ]# php service.php stop 8080
+
 获取亚马逊账号列表接口: 服务器4核8G服务器, 总请求数10000, 并发200, 1000分别测试, 结果如下:
 ab压测工具并发测试(吞吐量,每秒查询率QPS:4750~4966):
 
@@ -137,5 +140,64 @@ Percentage of the requests served within a certain time (ms)
   98%    467
   99%    650
  100%   1548 (longest request)
+
+
+
+[root@localhost mysql_pool_concurrency_server_web]# ab -n 10000 -c 1000 -k 192.168.168.200:8080/publish/lists?platform_code=Mercado
+This is ApacheBench, Version 2.3 <$Revision: 1430300 $>
+Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
+Licensed to The Apache Software Foundation, http://www.apache.org/
+
+Benchmarking 192.168.168.200 (be patient)
+Completed 1000 requests
+Completed 2000 requests
+Completed 3000 requests
+Completed 4000 requests
+Completed 5000 requests
+Completed 6000 requests
+Completed 7000 requests
+Completed 8000 requests
+Completed 9000 requests
+Completed 10000 requests
+Finished 10000 requests
+
+
+Server Software:        swoole-http-server
+Server Hostname:        192.168.168.200
+Server Port:            8080
+
+Document Path:          /publish/lists?platform_code=Mercado
+Document Length:        4537 bytes
+
+Concurrency Level:      1000
+Time taken for tests:   8.855 seconds
+Complete requests:      10000
+Failed requests:        0
+Write errors:           0
+Keep-Alive requests:    10000
+Total transferred:      47130000 bytes
+HTML transferred:       45370000 bytes
+Requests per second:    1129.26 [#/sec] (mean)
+Time per request:       885.539 [ms] (mean)
+Time per request:       0.886 [ms] (mean, across all concurrent requests)
+Transfer rate:          5197.44 [Kbytes/sec] received
+
+Connection Times (ms)
+              min  mean[+/-sd] median   max
+Connect:        0   59 258.3      0    3008
+Processing:    52  783 204.4    846    1300
+Waiting:        9  783 204.4    846    1300
+Total:         53  841 304.5    852    3909
+
+Percentage of the requests served within a certain time (ms)
+  50%    852
+  66%    877
+  75%    914
+  80%    940
+  90%   1009
+  95%   1138
+  98%   1692
+  99%   1773
+ 100%   3909 (longest request)
 
 ```
